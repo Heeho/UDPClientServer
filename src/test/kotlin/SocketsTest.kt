@@ -4,6 +4,8 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 
+//WIP
+
 fun main() {
     val cpacket = DatagramPacket(ByteArray(100),100, InetAddress.getByName("127.0.0.1"),40708)
     val spacket = DatagramPacket(ByteArray(100),5)
