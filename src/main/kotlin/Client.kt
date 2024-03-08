@@ -1,36 +1,136 @@
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.DataInputStream
-import java.io.DataOutputStream
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-
 class Client {
-    private val serveraddress = Common.serveraddress
-    private val serverport = Common.serverport
-    private val socket = DatagramSocket()
+  val protocolversion = Common.protocolversion
+  var serveraddress = Common.serveraddress
+  var serverport = Common.serverport
 
-    private val clientpacket = DatagramPacket(ByteArray(Common.maxPacketSize),0,serveraddress,serverport)
-    private val ostream = ByteArrayOutputStream()
-    private val odatastream = DataOutputStream(ostream)
+  val outsocket = DatagramSocket(serveraddress,serverport)
+  val outpacket = DatagramPacket()
+  val encoder = Encoder()
 
-    private val istream = ByteArrayInputStream(ByteArray(Common.maxPacketSize))
-    private val idatastream = DataInputStream(istream)
+  val insocket = DatagramSocket()
+  val inpacket = DatagramPacket()
+  val decoder = Decoder(inpacket.data)
 
-    fun send(p: Packet, pad: Boolean) {
-        val data = serialize(p)
+  var state = DISCONNECTED
+  var playerid = 0
+  val gamestate = GameState()
 
-        clientpacket.data = data
-        clientpacket.length = if(pad) Common.clientPacketPadding else data.size
+  var salt = 0
 
-        socket.send(clientpacket)
+  val packetids = listOf().apply {
+    Packets.values().forEach() {
+      this.add(it)
+    }
+  }
+
+  init {
+    insocket.setSoTimeout(Common.sotimeout)
+  }
+
+  fun run() {
+    emit()
+    receive()
+  }
+
+  fun emit() {
+    when(state) {
+      DISCONNECTED -> {
+        salt = Common.newsalt()
+        send(CONNECTION_REQUEST)
+        state = WAITING_CHALLENGE
+      }
+      WAITING_CHALLENGE -> {
+        send(CONNECTION_REQUEST)
+      }
+      WAITING_ACCEPTED -> {
+        send(CHALLENGE_RESPONSE)
+      }
+      CONNECTED -> {
+        send(KEEP_ALIVE)
+      }
+    }
+  }
+
+  fun send(p: Packets) {
+    if(!isclientpacket(p.type)) return
+
+    pack(encoder
+      .reset()
+      .write(protocolversion)
+      .write(p.type)
+      .apply {
+        when(p) {
+          CONNECTION_REQUEST,
+          CHALLENGE_RESPONSE,
+          KEEP_ALIVE -> { it.write(salt) }
+          PLAYER_CONTROL -> {}
+        }
+      }.bytes()
+    )
+
+    outsocket.send(outpacket)
+  }
+
+  fun isclientpacket(b: Byte) = b > 0
+
+  fun pack(b: ByteArray, pad: Boolean = true) {
+    outpacket.length = b.size
+    //todo: encrypt
+    if(pad)
+      outpacket.data = b.plus(ByteArray(Common.padTo - b.size))
+    else
+      outpacket.data = b
+  }
+
+  fun receive() {
+    when(state) {
+      DISCONNECTED -> return
     }
 
-    private fun serialize(p: Packet): ByteArray {
-        ostream.flush()
-        ostream.reset()
-        p.serialize(odatastream)
-        val data = ostream.toByteArray()
-        return data
+    try {
+      insocket.receive(inpacket)
+    } catch {
+      when(state) {
+        CONNECTED -> { state = DISCONNECTED }
+      }
+      return
     }
+
+    decoder.reset()
+
+    if(decoder.readInt() != Common.version) return
+
+    val packettype = decoder.readByte()
+    val insalt = decoder.readInt()
+
+    if(insalt != salt) return
+
+    when(state) {
+      WAITING_CHALLENGE -> {
+        when(packettype) {
+          CHALLENGE.id -> {
+            salt = salt ^ decoder.readInt()
+            send(CHALLENGE_RESPONSE)
+            state = WAITING_ACCEPTED
+          }
+        }
+      }
+      WAITING_ACCEPTED -> {
+        when(packettype) {
+          CONNECTION_ACCEPTED.id -> {
+            playerid = decoder.readInt()
+            state = CONNECTED
+          }
+          CONNECTION_REFUSED.id -> {
+            state = DISCONNECTED
+          }
+        }
+      }
+      CONNECTED -> {
+        if(packettype == GAME_STATE.id) {
+          gamestate.deserialize(decoder)
+        }
+      }
+    }
+  }
 }
