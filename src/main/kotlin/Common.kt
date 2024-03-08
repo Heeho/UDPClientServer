@@ -20,3 +20,31 @@ class Common {
         val CLIENT_PADDED_CONNECTION_PACKETS = listOf(CONNECTION_REQUEST, CHALLENGE_RESPONSE)
     }
 }
+
+enum class Packets {
+  CONNECTION_REQUEST(1),
+  CHALLENGE(0),
+  CHALLENGE_RESPONSE(2),
+  CONNECTION_ACCEPTED(-1),
+  CONNECTION_REFUSED(-2),
+  GAME_STATE(-3),
+  PLAYER_CONTROL(3),
+  KEEP_ALIVE(4)
+
+  val type: Byte
+}
+
+
+class GameState {
+  val players: Array<Player>(max)
+  var id = IntArray(max)
+  var hp = IntArray(max)
+  ...
+
+  fun serialize(e: Encoder) = e.write(id).write(hd)...
+
+  fun deserialize(d: Decoder) {
+    id = d.readInt()
+    ...
+  }
+}
