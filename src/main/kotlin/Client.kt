@@ -1,4 +1,11 @@
 class Client {
+enum class States {
+  DISCONNECTED,
+  WAITING_CHALLENGE,
+  WAITING_ACCEPTED,
+  CONNECTED
+}
+  
   val protocolversion = Common.protocolversion
   var serveraddress = Common.serveraddress
   var serverport = Common.serverport
