@@ -1,26 +1,28 @@
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+
 class Server {
-  val protocolversion = Common.protocolversion
-  //var serveraddress = Common.serveraddress
-  //var serverport = Common.serverport
-  val lastpackettimeout = Common.lastpackettimeout
+  private val protocolversion = Params.protocolversion
+  private val lastpackettimeout = Params.lastpackettimeout
 
-  val insocket = DatagramSocket()
-  val inpacket = DatagramPacket()
-  val decoder = Decoder(inpacket.data)
+  private val insocket = DatagramSocket(Params.port,Params.serveraddress)
+  private val inpacket = DatagramPacket(ByteArray(Params.padding),Params.padding)
+  private val decoder = Decoder(inpacket.data)
 
-  val outsocket = DatagramSocket()
-  val outpacket = DatagramPacket()
-  val encoder = Encoder()
+  private val outsocket = DatagramSocket()
+  private val outpacket = DatagramPacket(ByteArray(Params.padding),Params.padding)
+  private val encoder = Encoder()
 
-  val gamestate = GameState()
+  private val gamestate = GameState()
 
-  val maxclients = Common.servermaxplayers
-  val address = Array<InetAddress?>(maxclients)
-  val clientsalt = Array<Int?>(maxclients)
-  val serversalt = Array<Int?>(maxclients)
-  val salt = Array<Int?>(maxclients)
-  val connected = Array<Boolean>(maxclients)
-  val lastpocketdate = Array<Int?>(maxclients)
+  private val maxclients = Params.maxplayers
+  private val address = Array<InetAddress?>(maxclients) { null }
+  private val clientsalt = Array(maxclients) { 0 }
+  private val serversalt = Array(maxclients) { 0 }
+  private val salt = Array(maxclients) { 0 }
+  private val connected = Array(maxclients) { false }
+  private val lastpacketdate = Array<Long>(maxclients) { 0 }
 
   fun run() {
     broadcast()
@@ -28,27 +30,27 @@ class Server {
     purge()
   }
 
-  fun broadcast() {
-    for(var i = 0; i < maxclients; i++) {
+  private fun broadcast() {
+    for(i in 0 until maxclients) {
       if(connected[i]) {
         outpacket.address = address[i]
-        send(GAME_STATE)
+        send(Packets.GAME_STATE)
       }
     }
   }
 
-  fun purge() {
-    for(var i = 0; i < maxclients; i++) {
-      if(Now() - lastpacketdate[i]?:0 > lastpackettimeout) {
+  private fun purge() {
+    for(i in 0 until maxclients) {
+      if(clientsalt[i] > 0 && System.currentTimeMillis() - (lastpacketdate[i]) > lastpackettimeout) {
         initslot(i)
       }
     }
   }
 
-  fun receive() {
+  private fun receive() {
     try {
       insocket.receive(inpacket)
-    } catch { return }
+    } catch(e: Exception) { return }
 
     decoder.reset()
 
@@ -60,76 +62,80 @@ class Server {
     outpacket.address = inpacket.address
 
     when(packettype) {
-      CONNECTION_REQUEST.id -> {
-        val i = clientsalt.indexOf(null)
+      Packets.CONNECTION_REQUEST.id -> {
+        val i = clientsalt.indexOf(0)
         if(i < 0) {
-          send(CONNECTION_REFUSED)
+          send(Packets.CONNECTION_REFUSED)
         } else {
           address[i] = inpacket.address
           clientsalt[i] = insalt
-          serversalt[i] = Common.newsalt()
-          lastpacket[i] = Now()
-          send(CHALLENGE)
+          serversalt[i] = Utils.newsalt()
+          lastpacketdate[i] = System.currentTimeMillis()
+          send(Packets.CHALLENGE)
         }
       }
-      CHALLENGE_RESPONSE.id -> {
+      Packets.CHALLENGE_RESPONSE.id -> {
         val i = salt.indexOf(insalt)
         if (i < 0)  {
-          send(CONNECTION_REFUSED)
+          send(Packets.CONNECTION_REFUSED)
         } else {
           address[i] = inpacket.address
           connected[i] = true
-          lastpacket[i] = Now()
-          send(CONNECTION_ACCEPTED)
+          lastpacketdate[i] = System.currentTimeMillis()
+          send(Packets.CONNECTION_ACCEPTED)
         }
       }
-      KEEP_ALIVE.id -> {
+      Packets.KEEP_ALIVE.id -> {
         val i = salt.indexOf(insalt)
-        if not(i < 0)  {
+        if (i >= 0)  {
           address[i] = inpacket.address
-          lastpacket[i] = Now()
+          lastpacketdate[i] = System.currentTimeMillis()
         }
       }
-      PLAYER_CONTROL.id -> {
-        
-      }
+      Packets.PLAYER_CONTROL.id -> {}
       else -> {}
     }
   }
 
-  fun initslot(i: Int) {
+  private fun initslot(i: Int) {
     if(i < 0) return
 
     address[i] = null
     connected[i] = false
-    clientsalt[i] = null
-    serversalt[i] = null
-    salt[i] = null
-    lastpacket[i] = null
+    clientsalt[i] = 0
+    serversalt[i] = 0
+    salt[i] = 0
+    lastpacketdate[i] = 0
   }
 
-  fun isclientpacket(b: Byte) = b > 0
-
-  fun send(p: Packets) {
-    (isclientpacket(p.type)) return
-
+  private fun send(p: Packets) {
     val i = address.indexOf(outpacket.address)
     if(i < 0) return
 
     pack(encoder
       .reset()
       .write(protocolversion)
-      .write(p.type)
+      .write(p.id)
       .apply {
         when(p) {
-          CHALLENGE -> { it.write(clientsalt[i]).write(serversalt[i]) }
-          CONNECTION_ACCEPTED -> { it.write(salt[i]).write(i) }
-          CONNECTION_REFUSED -> { it.write(clientsalt[i]) }
-          GAME_STATE -> { gamestate.serialize(it) }
+          Packets.CHALLENGE -> { this.write(clientsalt[i]).write(serversalt[i]) }
+          Packets.CONNECTION_ACCEPTED -> { this.write(salt[i]).write(i) }
+          Packets.CONNECTION_REFUSED -> { this.write(clientsalt[i]) }
+          Packets.GAME_STATE -> { gamestate.serialize(this) }
+          else -> {}
         }
       }.bytes()
     )
 
     outsocket.send(outpacket)
+  }
+
+  private fun pack(b: ByteArray, pad: Boolean = true) {
+    outpacket.length = b.size
+    //encrypt bytes
+    if(pad)
+      outpacket.data = b.plus(ByteArray(Params.padding - b.size))
+    else
+      outpacket.data = b
   }
 }

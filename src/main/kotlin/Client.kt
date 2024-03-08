@@ -1,37 +1,33 @@
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+
 class Client {
-enum class States {
-  DISCONNECTED,
-  WAITING_CHALLENGE,
-  WAITING_ACCEPTED,
-  CONNECTED
-}
-  
-  val protocolversion = Common.protocolversion
-  var serveraddress = Common.serveraddress
-  var serverport = Common.serverport
-
-  val outsocket = DatagramSocket(serveraddress,serverport)
-  val outpacket = DatagramPacket()
-  val encoder = Encoder()
-
-  val insocket = DatagramSocket()
-  val inpacket = DatagramPacket()
-  val decoder = Decoder(inpacket.data)
-
-  var state = DISCONNECTED
-  var playerid = 0
-  val gamestate = GameState()
-
-  var salt = 0
-
-  val packetids = listOf().apply {
-    Packets.values().forEach() {
-      this.add(it)
-    }
+  private enum class States {
+    DISCONNECTED,
+    WAITING_CHALLENGE,
+    WAITING_ACCEPTED,
+    CONNECTED
   }
 
+  private val protocolversion = Params.protocolversion
+  private var serveraddress = Params.serveraddress
+  private var serverport = Params.port
+
+  private val outsocket = DatagramSocket()
+  private val outpacket = DatagramPacket(ByteArray(Params.padding),Params.padding,serveraddress,serverport)
+  private val encoder = Encoder()
+
+  private val insocket = DatagramSocket()
+  private val inpacket = DatagramPacket(ByteArray(Params.padding),Params.padding)
+  private val decoder = Decoder(inpacket.data)
+
+  private var state = States.DISCONNECTED
+  private var salt = 0
+  private var playerid = 0
+  private val gamestate = GameState()
+
   init {
-    insocket.setSoTimeout(Common.sotimeout)
+    insocket.soTimeout = Params.sotimeout
   }
 
   fun run() {
@@ -39,38 +35,37 @@ enum class States {
     receive()
   }
 
-  fun emit() {
+  private fun emit() {
     when(state) {
-      DISCONNECTED -> {
-        salt = Common.newsalt()
-        send(CONNECTION_REQUEST)
-        state = WAITING_CHALLENGE
+      States.DISCONNECTED -> {
+        salt = Utils.newsalt()
+        send(Packets.CONNECTION_REQUEST)
+        state = States.WAITING_CHALLENGE
       }
-      WAITING_CHALLENGE -> {
-        send(CONNECTION_REQUEST)
+      States.WAITING_CHALLENGE -> {
+        send(Packets.CONNECTION_REQUEST)
       }
-      WAITING_ACCEPTED -> {
-        send(CHALLENGE_RESPONSE)
+      States.WAITING_ACCEPTED -> {
+        send(Packets.CHALLENGE_RESPONSE)
       }
-      CONNECTED -> {
-        send(KEEP_ALIVE)
+      States.CONNECTED -> {
+        send(Packets.KEEP_ALIVE)
       }
     }
   }
 
-  fun send(p: Packets) {
-    if(!isclientpacket(p.type)) return
-
+  private fun send(p: Packets) {
     pack(encoder
       .reset()
       .write(protocolversion)
-      .write(p.type)
+      .write(p.id)
       .apply {
         when(p) {
-          CONNECTION_REQUEST,
-          CHALLENGE_RESPONSE,
-          KEEP_ALIVE -> { it.write(salt) }
-          PLAYER_CONTROL -> {}
+          Packets.CONNECTION_REQUEST,
+          Packets.CHALLENGE_RESPONSE,
+          Packets.KEEP_ALIVE -> { this.write(salt) }
+          Packets.PLAYER_CONTROL -> {}
+          else -> {}
         }
       }.bytes()
     )
@@ -78,34 +73,28 @@ enum class States {
     outsocket.send(outpacket)
   }
 
-  fun isclientpacket(b: Byte) = b > 0
-
-  fun pack(b: ByteArray, pad: Boolean = true) {
+  private fun pack(b: ByteArray, pad: Boolean = true) {
     outpacket.length = b.size
-    //todo: encrypt
+    //encrypt bytes
     if(pad)
-      outpacket.data = b.plus(ByteArray(Common.padTo - b.size))
+      outpacket.data = b.plus(ByteArray(Params.padding - b.size))
     else
       outpacket.data = b
   }
 
-  fun receive() {
-    when(state) {
-      DISCONNECTED -> return
-    }
+  private fun receive() {
+    if(state == States.DISCONNECTED) return
 
     try {
       insocket.receive(inpacket)
-    } catch {
-      when(state) {
-        CONNECTED -> { state = DISCONNECTED }
-      }
+    } catch(e: Exception) {
+      if(state == States.CONNECTED) { state = States.DISCONNECTED }
       return
     }
 
     decoder.reset()
 
-    if(decoder.readInt() != Common.version) return
+    if(decoder.readInt() != Params.protocolversion) return
 
     val packettype = decoder.readByte()
     val insalt = decoder.readInt()
@@ -113,31 +102,32 @@ enum class States {
     if(insalt != salt) return
 
     when(state) {
-      WAITING_CHALLENGE -> {
+      States.WAITING_CHALLENGE -> {
         when(packettype) {
-          CHALLENGE.id -> {
-            salt = salt ^ decoder.readInt()
-            send(CHALLENGE_RESPONSE)
-            state = WAITING_ACCEPTED
+          Packets.CHALLENGE.id -> {
+            salt = salt xor decoder.readInt()
+            send(Packets.CHALLENGE_RESPONSE)
+            state = States.WAITING_ACCEPTED
           }
         }
       }
-      WAITING_ACCEPTED -> {
+      States.WAITING_ACCEPTED -> {
         when(packettype) {
-          CONNECTION_ACCEPTED.id -> {
+          Packets.CONNECTION_ACCEPTED.id -> {
             playerid = decoder.readInt()
-            state = CONNECTED
+            state = States.CONNECTED
           }
-          CONNECTION_REFUSED.id -> {
-            state = DISCONNECTED
+          Packets.CONNECTION_REFUSED.id -> {
+            state = States.DISCONNECTED
           }
         }
       }
-      CONNECTED -> {
-        if(packettype == GAME_STATE.id) {
+      States.CONNECTED -> {
+        if(packettype == Packets.GAME_STATE.id) {
           gamestate.deserialize(decoder)
         }
       }
+      else -> {}
     }
   }
 }

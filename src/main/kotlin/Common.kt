@@ -1,27 +1,25 @@
 import java.net.InetAddress
+import java.util.*
 
-class Common {
+class Params {
     companion object {
         val serveraddress = InetAddress.getByName("127.0.0.1")
-        val version = "1.0.0".hashCode()
-
-        const val serverport = 40708
-        const val clientPacketPadding = 100
-        const val maxPacketSize = 100
-
-        const val DISCONNECT = 0
-        const val CONNECTION_REQUEST = 1
-        const val CHALLENGE = 2
-        const val CHALLENGE_RESPONSE = 3
-        const val CONNECTION_ACCEPTED = 4
-        const val CLIENT_PAYLOAD = 5
-        const val SERVER_PAYLOAD = 6
-
-        val CLIENT_PADDED_CONNECTION_PACKETS = listOf(CONNECTION_REQUEST, CHALLENGE_RESPONSE)
+        val port = 40708
+        val protocolversion = "1.0.0".hashCode()
+        val sotimeout = 5000
+        val lastpackettimeout = 100
+        val padding = 1000
+        val maxplayers = 11
     }
 }
 
-enum class Packets {
+class Utils {
+    companion object {
+        fun newsalt() = UUID.randomUUID().hashCode()
+    }
+}
+
+enum class Packets(val id: Byte) {
   CONNECTION_REQUEST(1),
   CHALLENGE(0),
   CHALLENGE_RESPONSE(2),
@@ -30,21 +28,19 @@ enum class Packets {
   GAME_STATE(-3),
   PLAYER_CONTROL(3),
   KEEP_ALIVE(4)
-
-  val type: Byte
 }
 
-
 class GameState {
-  val players: Array<Player>(max)
-  var id = IntArray(max)
-  var hp = IntArray(max)
-  ...
+    //var id = IntArray(11)
+    //var hp = IntArray(11)
+    //...
 
-  fun serialize(e: Encoder) = e.write(id).write(hd)...
+    fun serialize(e: Encoder) {
+        //= e.write(id).write(hd)...
+    }
 
-  fun deserialize(d: Decoder) {
-    id = d.readInt()
-    ...
-  }
+    fun deserialize(d: Decoder) {
+        //id = d.readInt()
+        //...
+    }
 }

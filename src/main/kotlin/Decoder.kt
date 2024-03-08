@@ -7,9 +7,6 @@ class Decoder(
     private val bais = ByteArrayInputStream(inputbuffer)
     private val dis = DataInputStream(bais)
 
-    init {
-    }
-
     val inputbuffersize get() = inputbuffer.size
 
     fun bind(b: ByteArray) {

@@ -5,7 +5,10 @@ class Encoder {
     private val baos = ByteArrayOutputStream()
     private val dos = DataOutputStream(baos)
 
-    fun reset() = baos.reset()
+    fun reset(): Encoder {
+        baos.reset()
+        return this
+    }
 
     fun write(v: Byte): Encoder {
         dos.writeByte(v.toInt())
