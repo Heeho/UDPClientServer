@@ -4,7 +4,7 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
-//
+
 class Client {
     private val serveraddress = Common.serveraddress
     private val serverport = Common.serverport
