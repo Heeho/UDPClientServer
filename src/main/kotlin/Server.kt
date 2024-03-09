@@ -21,15 +21,13 @@ class Server: Application() {
 
   override fun purge() {
     for(i in 0 until maxclients) {
-      if(clientsalt[i] > 0 && System.currentTimeMillis() - (lastpacketdate[i]) > lastpackettimeout) {
+      if(clientsalt[i] != 0 && timestamp - (lastpacketdate[i]) > lastpackettimeout) {
         initslot(i)
       }
     }
   }
 
   private fun initslot(i: Int) {
-    if(i < 0) return
-
     address[i] = null
     connected[i] = false
     clientsalt[i] = 0
@@ -53,14 +51,12 @@ class Server: Application() {
     when(packetmeta.type) {
       Packet.Type.CONNECTION_REQUEST.id -> {
         connreq.deserialize(decoder)
-        val i = clientsalt.indexOf(0)
-        if(i >= 0) {
-          address[i] = inpacket.address
+        val i = update(0)
+        if(i > 0) {
           clientsalt[i] = connreq.salt
           serversalt[i] = newsalt()
           salt[i] = clientsalt[i] xor serversalt[i]
-          lastpacketdate[i] = System.currentTimeMillis()
-          chal.salt = connreq.salt
+          chal.salt = clientsalt[i]
           chal.serversalt = serversalt[i]
           send(chal)
         } else {
@@ -70,10 +66,8 @@ class Server: Application() {
       }
       Packet.Type.CHALLENGE_RESPONSE.id -> {
         chalre.deserialize(decoder)
-        val i = salt.indexOf(chalre.salt)
-        if (i >= 0)  {
-          address[i] = inpacket.address
-          lastpacketdate[i] = System.currentTimeMillis()
+        val i = update(chalre.salt)
+        if(i > 0)  {
           connected[i] = true
           connacc.salt = chalre.salt
           send(connacc)
@@ -84,18 +78,11 @@ class Server: Application() {
       }
       Packet.Type.KEEP_ALIVE.id -> {
         keep.deserialize(decoder)
-        val i = salt.indexOf(keep.salt)
-        if (i >= 0)  {
-          address[i] = inpacket.address
-          lastpacketdate[i] = System.currentTimeMillis()
-        }
+        update(keep.salt)
       }
       Packet.Type.CLIENT_COMMAND.id -> {
         clientcom.deserialize(decoder)
-        val i = salt.indexOf(clientcom.salt)
-        if (i >= 0)  {
-          address[i] = inpacket.address
-          lastpacketdate[i] = System.currentTimeMillis()
+        if(update(clientcom.salt) > 0) {
           clientcomack.command = clientcom.command
           clientcomack.commanddate = clientcom.commanddate
           send(clientcomack)
@@ -103,5 +90,14 @@ class Server: Application() {
       }
       else -> {}
     }
+  }
+
+  fun update(s: Int): Int {
+    val i = salt.indexOf(s)
+    if(i >= 0)  {
+      address[i] = inpacket.address
+      lastpacketdate[i] = timestamp
+    }
+    return i
   }
 }
