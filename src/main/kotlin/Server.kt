@@ -1,8 +1,8 @@
-import java.net.DatagramPacket
-import java.net.DatagramSocket
+import common.Application
+import common.Packet
 import java.net.InetAddress
 
-class Server: Application extends EmitterReceiver {
+class Server: Application() {
   private val address = Array<InetAddress?>(maxclients) { null }
   private val clientsalt = Array(maxclients) { 0 }
   private val serversalt = Array(maxclients) { 0 }
@@ -10,22 +10,16 @@ class Server: Application extends EmitterReceiver {
   private val connected = Array(maxclients) { false }
   private val lastpacketdate = Array<Long>(maxclients) { 0 }
 
-  override fun run() {
-    emit()
-    receive()
-    purge()
-  }
-
-  override private fun emit() {
+  override fun emit() {
     for(i in 0 until maxclients) {
       if(connected[i]) {
         outpacket.address = address[i]
-        send(serverdata)
+        send(serverstate)
       }
     }
   }
 
-  override private fun purge() {
+  override fun purge() {
     for(i in 0 until maxclients) {
       if(clientsalt[i] > 0 && System.currentTimeMillis() - (lastpacketdate[i]) > lastpackettimeout) {
         initslot(i)
@@ -44,7 +38,7 @@ class Server: Application extends EmitterReceiver {
     lastpacketdate[i] = 0
   }
 
-  override private fun receive() {
+  override fun receive() {
     try {
       insocket.receive(inpacket)
     } catch(e: Exception) { return }
@@ -96,15 +90,15 @@ class Server: Application extends EmitterReceiver {
           lastpacketdate[i] = System.currentTimeMillis()
         }
       }
-      Packet.Type.CONTROL.id -> {
-        control.deserialize(decoder)
-        val i = salt.indexOf(control.salt)
+      Packet.Type.CLIENT_COMMAND.id -> {
+        clientcom.deserialize(decoder)
+        val i = salt.indexOf(clientcom.salt)
         if (i >= 0)  {
           address[i] = inpacket.address
           lastpacketdate[i] = System.currentTimeMillis()
-          playercontrolack.command = control.command
-          playercontrolack.commanddate = control.commanddate
-          send(playercontrolack)
+          clientcomack.command = clientcom.command
+          clientcomack.commanddate = clientcom.commanddate
+          send(clientcomack)
         }
       }
       else -> {}

@@ -1,7 +1,7 @@
-import java.net.DatagramPacket
-import java.net.DatagramSocket
+import common.*
+import java.util.ArrayList
 
-class Client: Application extends EmitterReceiver {
+class Client: Application() {
   private enum class States {
     DISCONNECTED,
     WAITING_CHALLENGE,
@@ -12,22 +12,13 @@ class Client: Application extends EmitterReceiver {
   private var state = States.DISCONNECTED
   private var salt = 0
   private var clientid = 0
-  private val gamestate = GameState()
-  private var timestamp = 0
-  private val commands = Queue<Command>()
+  private val commands = ArrayList<ClientCommand>()
 
-  fun command(c: Command) {
-    commands.enq(c)
+  fun command(c: ClientCommand) {
+    commands.add(0,c)
   }
 
-  override fun run() {
-    timestamp = System.currentTimeMillis/1000
-    emit()
-    receive()
-    purge()
-  }
-
-  override private fun emit() {
+  override fun emit() {
     when(state) {
       States.DISCONNECTED -> {
         salt = newsalt()
@@ -48,7 +39,7 @@ class Client: Application extends EmitterReceiver {
     }
   }
 
-  override private fun purge() {
+  override fun purge() {
     for(c in commands) {
       if(timestamp - c.commanddate > commandtimeout) {
         commands.remove(c)
@@ -56,7 +47,7 @@ class Client: Application extends EmitterReceiver {
     }
   }
 
-  override private fun receive() {
+  override fun receive() {
     if(state == States.DISCONNECTED) return
 
     try {
@@ -100,13 +91,13 @@ class Client: Application extends EmitterReceiver {
       States.CONNECTED -> {
         when(packetmeta.type) {
           Packet.Type.SERVER_STATE.id -> {
-            gamestate.deserialize(decoder)
+            serverstate.deserialize(decoder)
           }
-          Packets.CONTROL_ACK.id -> {
-            controlack.deserialize(decoder)
-            val c = commands.peek()
-            if(c.commanddate == controlack.commanddate && c.command == controlack.command)
-              commands.poll()
+          Packet.Type.CLIENT_COMMAND_ACK.id -> {
+            clientcomack.deserialize(decoder)
+            val c = commands.last()
+            if(c.commanddate == clientcomack.commanddate && c.command == clientcomack.command)
+              commands.removeLast()
           }
         }
       }
