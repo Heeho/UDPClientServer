@@ -23,6 +23,7 @@ open class Application {
     protected val outsocket = DatagramSocket()
     protected val outpacket = DatagramPacket(ByteArray(padding),padding,serveraddress,serverport)
     protected val encoder = Encoder()
+
     protected val packetmeta = SaltedPacket()
     protected val connreq = ConnectionRequest()
     protected val chal = Challenge()
