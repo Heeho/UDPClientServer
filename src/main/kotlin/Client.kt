@@ -1,7 +1,7 @@
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 
-class Client {
+class Client: Application extends EmitterReceiver {
   private enum class States {
     DISCONNECTED,
     WAITING_CHALLENGE,
@@ -9,122 +9,105 @@ class Client {
     CONNECTED
   }
 
-  private val protocolversion = Params.protocolversion
-  private var serveraddress = Params.serveraddress
-  private var serverport = Params.port
-
-  private val outsocket = DatagramSocket()
-  private val outpacket = DatagramPacket(ByteArray(Params.padding),Params.padding,serveraddress,serverport)
-  private val encoder = Encoder()
-
-  private val insocket = DatagramSocket()
-  private val inpacket = DatagramPacket(ByteArray(Params.padding),Params.padding)
-  private val decoder = Decoder(inpacket.data)
-
   private var state = States.DISCONNECTED
   private var salt = 0
-  private var playerid = 0
+  private var clientid = 0
   private val gamestate = GameState()
+  private var timestamp = 0
+  private val commands = Queue<Command>()
 
-  init {
-    insocket.soTimeout = Params.sotimeout
+  fun command(c: Command) {
+    commands.enq(c)
   }
 
-  fun run() {
+  override fun run() {
+    timestamp = System.currentTimeMillis/1000
     emit()
     receive()
+    purge()
   }
 
-  private fun emit() {
+  override private fun emit() {
     when(state) {
       States.DISCONNECTED -> {
-        salt = Utils.newsalt()
-        send(Packets.CONNECTION_REQUEST)
+        salt = newsalt()
+        connreq.salt = salt
+        send(connreq)
         state = States.WAITING_CHALLENGE
       }
       States.WAITING_CHALLENGE -> {
-        send(Packets.CONNECTION_REQUEST)
+        send(connreq)
       }
       States.WAITING_ACCEPTED -> {
-        send(Packets.CHALLENGE_RESPONSE)
+        send(chalre)
       }
       States.CONNECTED -> {
-        send(Packets.KEEP_ALIVE)
+        //if(!sendcontrol())
+        send(keep)
       }
     }
   }
 
-  private fun send(p: Packets) {
-    pack(encoder
-      .reset()
-      .write(protocolversion)
-      .write(p.id)
-      .apply {
-        when(p) {
-          Packets.CONNECTION_REQUEST,
-          Packets.CHALLENGE_RESPONSE,
-          Packets.KEEP_ALIVE -> { this.write(salt) }
-          Packets.PLAYER_CONTROL -> {}
-          else -> {}
-        }
-      }.bytes()
-    )
-
-    outsocket.send(outpacket)
+  override private fun purge() {
+    for(c in commands) {
+      if(timestamp - c.commanddate > commandtimeout) {
+        commands.remove(c)
+      }
+    }
   }
 
-  private fun pack(b: ByteArray, pad: Boolean = true) {
-    outpacket.length = b.size
-    //encrypt bytes
-    if(pad)
-      outpacket.data = b.plus(ByteArray(Params.padding - b.size))
-    else
-      outpacket.data = b
-  }
-
-  private fun receive() {
+  override private fun receive() {
     if(state == States.DISCONNECTED) return
 
     try {
       insocket.receive(inpacket)
     } catch(e: Exception) {
-      if(state == States.CONNECTED) { state = States.DISCONNECTED }
+      if(state == States.CONNECTED) {
+        state = States.DISCONNECTED
+      }
       return
     }
 
     decoder.reset()
+    packetmeta.deserialize(decoder)
+    if(packetmeta.protocolversion != protocolversion || packetmeta.salt != salt) return
 
-    if(decoder.readInt() != Params.protocolversion) return
-
-    val packettype = decoder.readByte()
-    val insalt = decoder.readInt()
-
-    if(insalt != salt) return
-
+    decoder.reset()
     when(state) {
       States.WAITING_CHALLENGE -> {
-        when(packettype) {
-          Packets.CHALLENGE.id -> {
-            salt = salt xor decoder.readInt()
-            send(Packets.CHALLENGE_RESPONSE)
+        when(packetmeta.type) {
+          Packet.Type.CHALLENGE.id -> {
+            chal.deserialize(decoder)
+            salt = salt xor chal.serversalt
+            chalre.salt = salt
+            send(chalre)
             state = States.WAITING_ACCEPTED
           }
         }
       }
       States.WAITING_ACCEPTED -> {
-        when(packettype) {
-          Packets.CONNECTION_ACCEPTED.id -> {
-            playerid = decoder.readInt()
+        when(packetmeta.type) {
+          Packet.Type.CONNECTION_ACCEPTED.id -> {
+            connacc.deserialize(decoder)
+            clientid = connacc.clientid
             state = States.CONNECTED
           }
-          Packets.CONNECTION_REFUSED.id -> {
+          Packet.Type.CONNECTION_REFUSED.id -> {
             state = States.DISCONNECTED
           }
         }
       }
       States.CONNECTED -> {
-        if(packettype == Packets.GAME_STATE.id) {
-          gamestate.deserialize(decoder)
+        when(packetmeta.type) {
+          Packet.Type.SERVER_STATE.id -> {
+            gamestate.deserialize(decoder)
+          }
+          Packets.CONTROL_ACK.id -> {
+            controlack.deserialize(decoder)
+            val c = commands.peek()
+            if(c.commanddate == controlack.commanddate && c.command == controlack.command)
+              commands.poll()
+          }
         }
       }
       else -> {}
