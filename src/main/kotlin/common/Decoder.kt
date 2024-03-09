@@ -4,7 +4,7 @@ import java.io.ByteArrayInputStream
 import java.io.DataInputStream
 
 class Decoder(
-    val buffer: ByteArray = byteArrayOf(0)
+    val buffer: ByteArray
 ) {
     private val bais = ByteArrayInputStream(buffer)
     private val dis = DataInputStream(bais)
