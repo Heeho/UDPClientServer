@@ -14,8 +14,14 @@ class Client: Application() {
   private var clientid = 0
   private val commands = ArrayList<ClientCommand>()
 
-  fun command(c: ClientCommand) {
-    commands.add(0,c)
+  fun command(b: Byte) {
+    commands.add(
+      0,
+      ClientCommand.apply {
+        this.command = b
+        this.commanddate = timestamp
+      }
+    )
   }
 
   override fun emit() {
