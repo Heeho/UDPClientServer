@@ -1,13 +1,15 @@
 package common
 
+import java.lang.Thread.sleep
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.util.*
+import kotlin.concurrent.thread
 
-open class Application {
+open class Application: Disposable {
     companion object {
-        val serveraddress = InetAddress.getByName("127.0.0.1")
+        val localaddress = InetAddress.getByName("127.0.0.1")
         val serverport = 40708
         val protocolversion = "1.0.0".hashCode()
         val sotimeout = 5000
@@ -15,13 +17,16 @@ open class Application {
         val lastpackettimeout = 100
         val padding = 1000
         val maxclients = 11
+
+        val emitintervalmillis = 1000L
+        val receiveintervalmillis = 1000L
     }
 
-    protected val insocket = DatagramSocket()
+    val socket = DatagramSocket(null)
+
     protected val inpacket = DatagramPacket(ByteArray(padding),padding)
     protected val decoder = Decoder(inpacket.data)
-    protected val outsocket = DatagramSocket()
-    protected val outpacket = DatagramPacket(ByteArray(padding),padding,serveraddress,serverport)
+    protected val outpacket = DatagramPacket(ByteArray(padding),padding)
     protected val encoder = Encoder()
 
     protected val packetmeta = SaltedPacket()
@@ -34,19 +39,57 @@ open class Application {
     protected val clientcom = ClientCommand()
     protected val clientcomack = ClientCommandAck()
     protected val keep = KeepAlive()
+    protected val disconnect = Disconnect()
 
-    protected var timestamp = 0L
+    protected var emittimestamp = System.currentTimeMillis()
+    protected var receivetimestamp = System.currentTimeMillis()
+
+    private var emitting = false
+    private var receiving = false
+
+    private val emitthread = thread(start=false) {
+        emitting = true
+        while(emitting) {
+            emittimestamp = System.currentTimeMillis()
+            emit()
+            sleep(emitintervalmillis)
+        }
+    }
+    private val receivethread = thread(start=false) {
+        receiving = true
+        while(receiving) {
+            receivetimestamp = System.currentTimeMillis()
+            purge()
+            receive()
+            sleep(receiveintervalmillis)
+        }
+    }
 
     init {
-        insocket.soTimeout = sotimeout
+        socket.reuseAddress = true
+        socket.soTimeout = sotimeout
     }
 
-    fun run() {
-        timestamp = System.currentTimeMillis()
-        emit()
-        receive()
-        purge()
+    fun start() {
+        startemit()
+        startreceive()
     }
+
+    fun stop() {
+        stopemit()
+        stopreceive()
+    }
+
+    override fun dispose() {
+        stop()
+        decoder.dispose()
+        encoder.dispose()
+    }
+
+    private fun startemit() { emitthread.start() }
+    private fun stopemit() { emitting = false }
+    private fun startreceive() { receivethread.start() }
+    private fun stopreceive() { receiving = false }
 
     protected open fun emit() {}
     protected open fun receive() {}
@@ -57,20 +100,37 @@ open class Application {
             .apply{ p.serialize(this) }
             .bytes()
         )
-
-        outsocket.send(outpacket)
+        socket.send(outpacket)
     }
 
-    protected fun pack(b: ByteArray, pad: Boolean = true) {
+    private fun pack(b: ByteArray, pad: Boolean = true) {
         outpacket.length = b.size
 
         val d = if(pad) b.plus(ByteArray(padding - b.size))
         else b
 
-        //encrypt data here
+        //encrypt d here
 
         outpacket.data = d
     }
 
     protected fun newsalt() = UUID.randomUUID().hashCode()
+
+    fun getappstatus() {
+        println("--SOCKETS")
+        println("${this.socket.localAddress} ${this.socket.localPort}")
+        println("--DATAGRAMS")
+        println("inpacket: ${inpacket.address}:${inpacket.port}")
+        println("outpacket: ${outpacket.address}:${outpacket.port}")
+        println("--PACKETS")
+        println("connreq: $connreq")
+        println("chalre: $chalre")
+        println("connacc: $connacc")
+        println("connref: $connref")
+        println("serverstate: $serverstate")
+        println("clientcom: $clientcom")
+        println("clientcomack: $clientcomack")
+        println("keep: $keep")
+        println("disconnect: $disconnect")
+    }
 }

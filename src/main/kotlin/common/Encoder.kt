@@ -3,9 +3,11 @@ package common
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 
-class Encoder {
+class Encoder: Disposable {
     private val baos = ByteArrayOutputStream()
     private val dos = DataOutputStream(baos)
+
+    override fun dispose() = dos.close()
 
     fun reset(): Encoder {
         baos.reset()

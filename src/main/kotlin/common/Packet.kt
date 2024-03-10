@@ -36,6 +36,8 @@ open class SaltedPacket: Packet() {
         super.deserialize(d)
         salt = d.readInt()
     }
+
+    override fun toString(): String = "$protocolversion, $type, $salt"
 }
 
 class ConnectionRequest: SaltedPacket() {
@@ -80,6 +82,10 @@ class KeepAlive: SaltedPacket() {
     init { type = Type.KEEP_ALIVE.id }
 }
 
+class Disconnect: SaltedPacket() {
+    init { type = Type.KEEP_ALIVE.id }
+}
+
 class ServerState: SaltedPacket() {
     init { type = Type.SERVER_STATE.id }
 
@@ -96,14 +102,14 @@ class ServerState: SaltedPacket() {
 open class ClientCommand: SaltedPacket() {
     init { type = Type.CLIENT_COMMAND.id }
 
-    var commanddate = 0
+    var commanddate = 0L
     var command: Byte = 0
 
     override fun serialize(e: Encoder): Encoder = super.serialize(e).write(commanddate).write(command)
 
     override fun deserialize(d: Decoder) {
         super.deserialize(d)
-        commanddate = d.readInt()
+        commanddate = d.readLong()
         command = d.readByte()
     }
 }

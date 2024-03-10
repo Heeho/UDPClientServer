@@ -1,4 +1,5 @@
-import common.Encoder
+package common
+
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.BeforeEach
@@ -13,7 +14,7 @@ class EncoderTest {
     private val testbytearray = byteArrayOf(11,22)
 
     @BeforeEach
-    fun init() {
+    fun rewind() {
         encoder.reset()
     }
 
