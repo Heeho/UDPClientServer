@@ -91,16 +91,12 @@ open class Application(
     private fun startreceive() { receivethread.start() }
     private fun stopreceive() { receiving = false }
 
-    protected open fun emit() {
-
-    }
+    protected open fun emit() {}
+    protected open fun purge() {}
 
     protected open fun receive() {
+        //test
         println("${this::class.java} received packet: ${Packet.Type.values().first { it.id == packetmeta.type }}")
-    }
-
-    protected open fun purge() {
-
     }
 
     protected fun send(p: Packet) {
@@ -109,6 +105,7 @@ open class Application(
             .bytes()
         )
         socket.send(outpacket)
+        //test
         println("${this::class.java} sent packet: ${Packet.Type.values().first { it.id == p.type }}")
     }
 
