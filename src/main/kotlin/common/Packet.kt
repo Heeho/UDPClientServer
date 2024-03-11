@@ -28,16 +28,16 @@ open class Packet {
 }
 
 open class SaltedPacket: Packet() {
-    var salt = 0
+    var clientsalt = 0
 
-    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(salt)
+    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(clientsalt)
 
     override fun deserialize(d: Decoder) {
         super.deserialize(d)
-        salt = d.readInt()
+        clientsalt = d.readInt()
     }
 
-    override fun toString(): String = "$protocolversion, $type, $salt"
+    override fun toString(): String = "$protocolversion, $type, $clientsalt"
 }
 
 class ConnectionRequest: SaltedPacket() {
@@ -59,6 +59,15 @@ class Challenge: SaltedPacket() {
 
 class ChallengeResponse: SaltedPacket() {
     init { type = Type.CHALLENGE_RESPONSE.id }
+
+    var xorsalt = 0
+
+    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(xorsalt)
+
+    override fun deserialize(d: Decoder) {
+        super.deserialize(d)
+        xorsalt = d.readInt()
+    }
 }
 
 class ConnectionAccepted: SaltedPacket() {
@@ -83,7 +92,7 @@ class KeepAlive: SaltedPacket() {
 }
 
 class Disconnect: SaltedPacket() {
-    init { type = Type.KEEP_ALIVE.id }
+    init { type = Type.DISCONNECT.id }
 }
 
 class ServerState: SaltedPacket() {

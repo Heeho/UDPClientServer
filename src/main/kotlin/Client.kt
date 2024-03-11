@@ -1,8 +1,11 @@
 import common.*
+import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.util.ArrayList
 
-class Client: Application() {
+class Client(
+  socket: DatagramSocket = DatagramSocket()
+): Application(socket) {
   enum class State {
     DISCONNECTED,
     WAITING_CHALLENGE,
@@ -11,34 +14,13 @@ class Client: Application() {
   }
 
   var state = State.DISCONNECTED; private set
-  var salt = 0; private set
+  var clientsalt = newsalt(); private set
   var clientid = 0; private set
   private val commands = ArrayList<ClientCommand>()
 
   init {
-    socket.bind(InetSocketAddress(localaddress,0))
     outpacket.socketAddress = InetSocketAddress(localaddress,serverport)
-  }
-
-  override fun emit() {
-    when(state) {
-      State.DISCONNECTED -> {
-        salt = newsalt()
-        connreq.salt = salt
-        send(connreq)
-        state = State.WAITING_CHALLENGE
-      }
-      State.WAITING_CHALLENGE -> {
-        send(connreq)
-      }
-      State.WAITING_ACCEPTED -> {
-        send(chalre)
-      }
-      State.CONNECTED -> {
-        //if(!sendcontrol())
-        send(keep)
-      }
-    }
+    connreq.clientsalt = clientsalt
   }
 
   override fun purge() {
@@ -49,27 +31,44 @@ class Client: Application() {
     }
   }
 
+  override fun emit() {
+    when(state) {
+      State.CONNECTED -> {
+        //if no commands to send:
+        send(keep)
+      }
+      else -> {}
+    }
+  }
   override fun receive() {
-    if(state == State.DISCONNECTED) return
+    if(state == State.DISCONNECTED) {
+      send(connreq)
+      state = State.WAITING_CHALLENGE
+      return
+    }
 
     try {
       socket.receive(inpacket)
     } catch(e: Exception) {
-      if(state == State.CONNECTED) {
-        state = State.DISCONNECTED
+      when(state) {
+        State.CONNECTED -> {
+          state = State.DISCONNECTED
+        }
+        State.WAITING_CHALLENGE -> {
+          send(connreq)
+        }
+        State.WAITING_ACCEPTED -> {
+          send(chalre)
+        }
+        else -> {}
       }
-      return
     }
 
     decoder.reset()
     packetmeta.deserialize(decoder)
+    super.receive()
 
-    println("client received packet:")
-    println(packetmeta.protocolversion)
-    println(packetmeta.type)
-    println(packetmeta.salt)
-
-    if(packetmeta.protocolversion != protocolversion || packetmeta.salt != salt) return
+    if(packetmeta.protocolversion != protocolversion || packetmeta.clientsalt != clientsalt) return
 
     decoder.reset()
     when(state) {
@@ -77,8 +76,8 @@ class Client: Application() {
         when(packetmeta.type) {
           Packet.Type.CHALLENGE.id -> {
             chal.deserialize(decoder)
-            salt = salt xor chal.serversalt
-            chalre.salt = salt
+            chalre.clientsalt = clientsalt
+            chalre.xorsalt = clientsalt xor chal.serversalt
             send(chalre)
             state = State.WAITING_ACCEPTED
           }
@@ -125,8 +124,9 @@ class Client: Application() {
 
   fun disconnect() {
     if(state == State.CONNECTED) {
-      disconnect.salt = salt
+      disconnect.clientsalt = clientsalt
       for (i in 0..10) send(disconnect)
+      state = State.DISCONNECTED
     }
   }
 }

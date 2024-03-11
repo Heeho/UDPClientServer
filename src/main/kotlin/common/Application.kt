@@ -7,7 +7,9 @@ import java.net.InetAddress
 import java.util.*
 import kotlin.concurrent.thread
 
-open class Application: Disposable {
+open class Application(
+    protected val socket: DatagramSocket
+): Disposable {
     companion object {
         val localaddress = InetAddress.getByName("127.0.0.1")
         val serverport = 40708
@@ -21,8 +23,6 @@ open class Application: Disposable {
         val emitintervalmillis = 1000L
         val receiveintervalmillis = 1000L
     }
-
-    val socket = DatagramSocket(null)
 
     protected val inpacket = DatagramPacket(ByteArray(padding),padding)
     protected val decoder = Decoder(inpacket.data)
@@ -59,14 +59,13 @@ open class Application: Disposable {
         receiving = true
         while(receiving) {
             receivetimestamp = System.currentTimeMillis()
-            purge()
+            //purge()
             receive()
             sleep(receiveintervalmillis)
         }
     }
 
     init {
-        socket.reuseAddress = true
         socket.soTimeout = sotimeout
     }
 
@@ -82,8 +81,9 @@ open class Application: Disposable {
 
     override fun dispose() {
         stop()
-        decoder.dispose()
+        try { socket.close() } finally {  }
         encoder.dispose()
+        decoder.dispose()
     }
 
     private fun startemit() { emitthread.start() }
@@ -91,9 +91,17 @@ open class Application: Disposable {
     private fun startreceive() { receivethread.start() }
     private fun stopreceive() { receiving = false }
 
-    protected open fun emit() {}
-    protected open fun receive() {}
-    protected open fun purge() {}
+    protected open fun emit() {
+
+    }
+
+    protected open fun receive() {
+        println("${this::class.java} received packet: ${Packet.Type.values().first { it.id == packetmeta.type }}")
+    }
+
+    protected open fun purge() {
+
+    }
 
     protected fun send(p: Packet) {
         pack(encoder.reset()
@@ -101,6 +109,7 @@ open class Application: Disposable {
             .bytes()
         )
         socket.send(outpacket)
+        println("${this::class.java} sent packet: ${Packet.Type.values().first { it.id == p.type }}")
     }
 
     private fun pack(b: ByteArray, pad: Boolean = true) {
@@ -116,7 +125,7 @@ open class Application: Disposable {
 
     protected fun newsalt() = UUID.randomUUID().hashCode()
 
-    fun getappstatus() {
+    /*fun getappstatus() {
         println("--SOCKETS")
         println("${this.socket.localAddress} ${this.socket.localPort}")
         println("--DATAGRAMS")
@@ -132,5 +141,5 @@ open class Application: Disposable {
         println("clientcomack: $clientcomack")
         println("keep: $keep")
         println("disconnect: $disconnect")
-    }
+    }*/
 }

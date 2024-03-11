@@ -1,19 +1,17 @@
 import common.Application
 import common.Packet
+import java.net.DatagramSocket
 import java.net.InetAddress
-import java.net.InetSocketAddress
 
-class Server: Application() {
+class Server(
+  socket: DatagramSocket = DatagramSocket(serverport)
+): Application(socket) {
   private val address = Array<InetAddress?>(maxclients) { null }
   private val clientsalt = Array(maxclients) { 0 }
   private val serversalt = Array(maxclients) { 0 }
-  private val salt = Array(maxclients) { 0 }
+  private val xorsalt = Array(maxclients) { 0 }
   private val connected = Array(maxclients) { false }
   private val lastpacketdate = Array<Long>(maxclients) { 0 }
-
-  init {
-    socket.bind(InetSocketAddress(localaddress,serverport))
-  }
 
   override fun emit() {
     for(i in 0 until maxclients) {
@@ -22,6 +20,7 @@ class Server: Application() {
         send(serverstate)
       }
     }
+    super.emit()
   }
 
   override fun purge() {
@@ -37,7 +36,7 @@ class Server: Application() {
     connected[i] = false
     clientsalt[i] = 0
     serversalt[i] = 0
-    salt[i] = 0
+    xorsalt[i] = 0
     lastpacketdate[i] = 0
   }
 
@@ -48,35 +47,31 @@ class Server: Application() {
       socket.receive(inpacket)
     } catch(e: Exception) { return }
     packetmeta.deserialize(decoder)
+    super.receive()
 
     if(packetmeta.protocolversion != protocolversion) return
     outpacket.address = inpacket.address
     outpacket.port = inpacket.port
     decoder.reset()
 
-    var i = getclientid(packetmeta.salt)
+    var i = getclientid(packetmeta.clientsalt)
 
     if(i < 0) {
       when(packetmeta.type) {
         Packet.Type.CONNECTION_REQUEST.id -> {
           i = getclientid(0)
-          if(i > 0) {
+          if(i >= 0) {
             connreq.deserialize(decoder)
-            clientsalt[i] = connreq.salt
+            clientsalt[i] = connreq.clientsalt
             serversalt[i] = newsalt()
-            salt[i] = clientsalt[i] xor serversalt[i]
-            chal.salt = clientsalt[i]
+            xorsalt[i] = clientsalt[i] xor serversalt[i]
+            chal.clientsalt = clientsalt[i]
             chal.serversalt = serversalt[i]
             send(chal)
           } else {
-            connref.salt = connreq.salt
+            connref.clientsalt = connreq.clientsalt
             send(connref)
           }
-        }
-        Packet.Type.CHALLENGE_RESPONSE.id -> {
-          chalre.deserialize(decoder)
-          connref.salt = chalre.salt
-          send(connref)
         }
         else -> {}
       }
@@ -84,16 +79,22 @@ class Server: Application() {
       when(packetmeta.type) {
         Packet.Type.CHALLENGE_RESPONSE.id -> {
           chalre.deserialize(decoder)
-          connected[i] = true
-          connacc.salt = chalre.salt
-          send(connacc)
+          if(chalre.xorsalt == xorsalt[i]) {
+            connected[i] = true
+            connacc.clientsalt = chalre.clientsalt
+            send(connacc)
+          } else {
+            connref.clientsalt = chalre.clientsalt
+            send(connref)
+          }
         }
         Packet.Type.KEEP_ALIVE.id -> {
           keep.deserialize(decoder)
-          getclientid(keep.salt)
+          getclientid(keep.clientsalt)
         }
         Packet.Type.CLIENT_COMMAND.id -> {
           clientcom.deserialize(decoder)
+          clientcomack.clientsalt = clientsalt[i]
           clientcomack.command = clientcom.command
           clientcomack.commanddate = clientcom.commanddate
           send(clientcomack)
@@ -107,7 +108,7 @@ class Server: Application() {
   }
 
   fun getclientid(salt: Int): Int {
-    val i = this.salt.indexOf(salt)
+    val i = clientsalt.indexOf(salt)
     if(i >= 0)  {
       address[i] = inpacket.address
       lastpacketdate[i] = receivetimestamp
@@ -115,5 +116,5 @@ class Server: Application() {
     return i
   }
 
-  fun getclientcount() = connected.count { it }
+  //fun getclientcount() = connected.count { it }
 }

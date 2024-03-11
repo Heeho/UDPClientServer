@@ -5,11 +5,13 @@ import java.lang.Thread.sleep
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ApplicationTest {
-    private var client: Client = Client()
-    private var server: Server = Server()
+    private var client = Client()
+    private var server = Server()
 
     @BeforeEach
     fun inittest() {
+        client.dispose()
+        server.dispose()
         client = Client()
         server = Server()
     }
@@ -19,15 +21,11 @@ class ApplicationTest {
         server.start()
         client.start()
 
-        while(server.getclientcount() == 0) {
-            println("\n--STATUS")
-            println("\n--CLIENT")
-            println(client.state)
-            client.getappstatus()
-            println("\n--SERVER")
-            server.getappstatus()
-            sleep(2000)
-        }
+        sleep(7000)
+        client.command(1)
+        sleep(5000)
+        client.disconnect()
+
         client.dispose()
         server.dispose()
     }
