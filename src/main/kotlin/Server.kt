@@ -1,120 +1,125 @@
 import common.Application
 import common.Packet
 import java.net.DatagramSocket
-import java.net.InetAddress
+import java.net.SocketTimeoutException
+import kotlin.collections.ArrayList
 
 class Server(
   socket: DatagramSocket = DatagramSocket(serverport)
 ): Application(socket) {
-  private val address = Array<InetAddress?>(maxclients) { null }
-  private val clientsalt = Array(maxclients) { 0 }
-  private val serversalt = Array(maxclients) { 0 }
-  private val xorsalt = Array(maxclients) { 0 }
-  private val connected = Array(maxclients) { false }
-  private val lastpacketdate = Array<Long>(maxclients) { 0 }
+  val serverprivatekey: Long
+  val serverpublickey: Long
+
+  init {
+    serverprivatekey = 1
+    serverpublickey = 1
+  }
+
+  private val connections = ArrayList<Connection>()
 
   override fun emit() {
-    for(i in 0 until maxclients) {
-      if(connected[i]) {
-        outpacket.address = address[i]
+    for(c in connections.shuffled()) {
+      if(c.connected) {
+        outpacket.address = c.address
         send(serverstate)
       }
     }
     super.emit()
   }
 
-  override fun purge() {
-    for(i in 0 until maxclients) {
-      if(clientsalt[i] != 0 && receivetimestamp - (lastpacketdate[i]) > lastpackettimeout) {
-        initslot(i)
-      }
-    }
-  }
-
-  private fun initslot(i: Int) {
-    address[i] = null
-    connected[i] = false
-    clientsalt[i] = 0
-    serversalt[i] = 0
-    xorsalt[i] = 0
-    lastpacketdate[i] = 0
+  private fun purge() {
+    connections.removeIf { receivetimestamp - (it.lastpackettimestamp) > lastpackettimeout }
   }
 
   override fun receive() {
-    decoder.reset()
+    purge()
 
     try {
       socket.receive(inpacket)
-    } catch(e: Exception) { return }
-    packetmeta.deserialize(decoder)
+    } catch(ste: SocketTimeoutException) {
+      println(ste)
+      return
+    }
+
+    if(badmeta()) return
     super.receive()
 
-    if(packetmeta.protocolversion != protocolversion) return
     outpacket.address = inpacket.address
     outpacket.port = inpacket.port
-    decoder.reset()
 
-    var i = getclientid(packetmeta.clientsalt)
 
-    if(i < 0) {
+    val connection = connections.find { c -> c.address == inpacket.address }
+
+    if(connection == null) {
       when(packetmeta.type) {
         Packet.Type.CONNECTION_REQUEST.id -> {
-          i = getclientid(0)
-          if(i >= 0) {
-            connreq.deserialize(decoder)
-            clientsalt[i] = connreq.clientsalt
-            serversalt[i] = newsalt()
-            xorsalt[i] = clientsalt[i] xor serversalt[i]
-            chal.clientsalt = clientsalt[i]
-            chal.serversalt = serversalt[i]
-            send(chal)
-          } else {
-            connref.clientsalt = connreq.clientsalt
+          if(connections.size >= maxconnections)
             send(connref)
+          else {
+            connreq.deserialize(decoder)
+            val c = Connection(
+              inpacket.address,
+              connreq.clientpublickey,
+              newtoken(),
+              false,
+              receivetimestamp
+            )
+            connections.add(c)
+            chal.token = c.token
+            chal.serverpublickey = serverpublickey
+            send(chal)
           }
         }
         else -> {}
       }
     } else {
-      when(packetmeta.type) {
-        Packet.Type.CHALLENGE_RESPONSE.id -> {
-          chalre.deserialize(decoder)
-          if(chalre.xorsalt == xorsalt[i]) {
-            connected[i] = true
-            connacc.clientsalt = chalre.clientsalt
-            send(connacc)
-          } else {
-            connref.clientsalt = chalre.clientsalt
-            send(connref)
+      if(connection.connected) {
+        connection.lastpackettimestamp = receivetimestamp
+        when(packetmeta.type) {
+          Packet.Type.COMMAND.id -> {
+            command.deserialize(decoder)
+            comack.token = connection.token
+            comack.command = command.command
+            comack.commanddate = command.commanddate
+            send(comack)
+          }
+          Packet.Type.DISCONNECT.id -> {
+            connections.remove(connection)
+          }
+          else -> {
+            //println("received wrong packet: $packetmeta")
           }
         }
-        Packet.Type.KEEP_ALIVE.id -> {
-          keep.deserialize(decoder)
-          getclientid(keep.clientsalt)
+      } else {
+        when(packetmeta.type) {
+          Packet.Type.CONNECTION_REQUEST.id -> {
+            connreq.deserialize(decoder)
+            chal.token = connection.token
+            chal.serverpublickey = serverpublickey
+            send(chal)
+          }
+          Packet.Type.CHALLENGE_RESPONSE.id -> {
+            chalre.deserialize(decoder)
+            if (chalre.token == connection.token) {
+              connection.connected = true
+              connacc.token = chalre.token
+              send(connacc)
+            } else {
+              send(connref)
+            }
+          }
+          else -> {
+            //println("received wrong packet, client is already connected: $packetmeta")
+          }
         }
-        Packet.Type.CLIENT_COMMAND.id -> {
-          clientcom.deserialize(decoder)
-          clientcomack.clientsalt = clientsalt[i]
-          clientcomack.command = clientcom.command
-          clientcomack.commanddate = clientcom.commanddate
-          send(clientcomack)
-        }
-        Packet.Type.DISCONNECT.id -> {
-          initslot(i)
-        }
-        else -> {}
       }
     }
   }
 
-  fun getclientid(salt: Int): Int {
-    val i = clientsalt.indexOf(salt)
-    if(i >= 0)  {
-      address[i] = inpacket.address
-      lastpacketdate[i] = receivetimestamp
-    }
-    return i
+  override fun getappstatus() {
+    super.getappstatus()
+    println("--CONNECTIONS")
+    connections.forEach { println(it) }
   }
-
   //fun getclientcount() = connected.count { it }
 }

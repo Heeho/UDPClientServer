@@ -20,11 +20,19 @@ class ApplicationTest {
     fun connect() {
         server.start()
         client.start()
+        sleep(2000)
+        client.getappstatus()
+        server.getappstatus()
 
-        sleep(7000)
         client.command(1)
-        sleep(5000)
+        sleep(2000)
+        client.getappstatus()
+        server.getappstatus()
+
         client.disconnect()
+        sleep(2000)
+        client.getappstatus()
+        server.getappstatus()
 
         client.dispose()
         server.dispose()

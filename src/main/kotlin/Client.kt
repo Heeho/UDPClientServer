@@ -1,6 +1,7 @@
 import common.*
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
+import java.net.SocketTimeoutException
 import java.util.ArrayList
 
 class Client(
@@ -13,71 +14,71 @@ class Client(
     CONNECTED
   }
 
+  val clientprivatekey: Long
+  val clientpublickey: Long
+
   var state = State.DISCONNECTED; private set
-  var clientsalt = newsalt(); private set
+  var token = 0; private set
   var clientid = 0; private set
-  private val commands = ArrayList<ClientCommand>()
+  var lastkeepalivetimestamp = 0L; private set
+
+  private val commands = ArrayList<Command>()
 
   init {
+    clientprivatekey = 1
+    clientpublickey = 1
+
     outpacket.socketAddress = InetSocketAddress(localaddress,serverport)
-    connreq.clientsalt = clientsalt
+    connreq.clientpublickey = clientpublickey
   }
 
-  override fun purge() {
-    for(c in commands) {
-      if(receivetimestamp - c.commanddate > commandtimeout) {
-        commands.remove(c)
-      }
-    }
+  private fun connreq() {
+    connreq.clientpublickey = clientpublickey
+    send(connreq)
+    state = State.WAITING_CHALLENGE
   }
 
   override fun emit() {
     when(state) {
-      State.CONNECTED -> {
-        //if no commands to send:
-        send(keep)
+      State.DISCONNECTED -> {
+        connreq()
       }
-      else -> {}
+      State.WAITING_CHALLENGE -> {
+        send(connreq)
+      }
+      State.WAITING_ACCEPTED -> {
+        send(chalre)
+      }
+      State.CONNECTED -> {
+        if(commands.isNotEmpty())
+          send(commands.first())
+        if(lastkeepalivetimestamp < emittimestamp) {
+          lastkeepalivetimestamp = emittimestamp
+          send(keep)
+        }
+      }
     }
   }
+
   override fun receive() {
-    if(state == State.DISCONNECTED) {
-      send(connreq)
-      state = State.WAITING_CHALLENGE
+    try {
+      socket.receive(inpacket)
+    } catch(ste: SocketTimeoutException) {
+      println(ste)
       return
     }
 
-    try {
-      socket.receive(inpacket)
-    } catch(e: Exception) {
-      when(state) {
-        State.CONNECTED -> {
-          state = State.DISCONNECTED
-        }
-        State.WAITING_CHALLENGE -> {
-          send(connreq)
-        }
-        State.WAITING_ACCEPTED -> {
-          send(chalre)
-        }
-        else -> {}
-      }
-    }
-
-    decoder.reset()
-    packetmeta.deserialize(decoder)
+    if(badmeta()) return
     super.receive()
 
-    if(packetmeta.protocolversion != protocolversion || packetmeta.clientsalt != clientsalt) return
-
     decoder.reset()
+
     when(state) {
       State.WAITING_CHALLENGE -> {
         when(packetmeta.type) {
           Packet.Type.CHALLENGE.id -> {
             chal.deserialize(decoder)
-            chalre.clientsalt = clientsalt
-            chalre.xorsalt = clientsalt xor chal.serversalt
+            chalre.token = chal.token
             send(chalre)
             state = State.WAITING_ACCEPTED
           }
@@ -99,23 +100,23 @@ class Client(
         when(packetmeta.type) {
           Packet.Type.SERVER_STATE.id -> {
             serverstate.deserialize(decoder)
+            //
           }
-          Packet.Type.CLIENT_COMMAND_ACK.id -> {
-            clientcomack.deserialize(decoder)
-            val c = commands.last()
-            if(c.commanddate == clientcomack.commanddate && c.command == clientcomack.command)
-              commands.removeLast()
+          Packet.Type.COMMAND_ACK.id -> {
+            comack.deserialize(decoder)
+            commands.removeIf { it.commanddate == comack.commanddate && it.command == comack.command }
           }
         }
       }
-      else -> {}
+      else -> {
+        println("received wrong packet: $packetmeta")
+      }
     }
   }
 
   fun command(b: Byte) {
     commands.add(
-      0,
-      ClientCommand().apply {
+      Command().apply {
         this.command = b
         this.commanddate = receivetimestamp
       }
@@ -124,9 +125,10 @@ class Client(
 
   fun disconnect() {
     if(state == State.CONNECTED) {
-      disconnect.clientsalt = clientsalt
+      disconnect.token = token
       for (i in 0..10) send(disconnect)
       state = State.DISCONNECTED
+      stop()
     }
   }
 }

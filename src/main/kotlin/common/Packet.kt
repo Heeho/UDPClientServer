@@ -9,8 +9,8 @@ open class Packet {
         CONNECTION_REFUSED(-22),
 
         SERVER_STATE(-3),
-        CLIENT_COMMAND(3),
-        CLIENT_COMMAND_ACK(-4),
+        COMMAND(3),
+        COMMAND_ACK(-4),
         KEEP_ALIVE(4),
 
         DISCONNECT(5)
@@ -25,52 +25,56 @@ open class Packet {
         protocolversion = d.readInt()
         type = d.readByte()
     }
+
+    override fun toString(): String = "$protocolversion, $type"
 }
 
-open class SaltedPacket: Packet() {
-    var clientsalt = 0
+class ConnectionRequest(
+    var clientpublickey: Long = 0
+): Packet() {
+    init { type = Type.CONNECTION_REQUEST.id }
 
-    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(clientsalt)
+    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(clientpublickey)
 
     override fun deserialize(d: Decoder) {
         super.deserialize(d)
-        clientsalt = d.readInt()
+        clientpublickey = d.readLong()
+    }
+}
+
+open class TokenPacket: Packet() {
+    var token = 0
+
+    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(token)
+
+    override fun deserialize(d: Decoder) {
+        super.deserialize(d)
+        token = d.readInt()
     }
 
-    override fun toString(): String = "$protocolversion, $type, $clientsalt"
+    override fun toString(): String = super.toString()+", $token"
 }
 
-class ConnectionRequest: SaltedPacket() {
-    init { type = Type.CONNECTION_REQUEST.id }
-}
-
-class Challenge: SaltedPacket() {
+class Challenge: TokenPacket() {
     init { type = Type.CHALLENGE.id }
 
-    var serversalt = 0
+    var serverpublickey = 0L
 
-    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(serversalt)
+    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(serverpublickey)
 
     override fun deserialize(d: Decoder) {
         super.deserialize(d)
-        serversalt = d.readInt()
+        serverpublickey = d.readLong()
     }
+
+    override fun toString(): String = super.toString()+", $serverpublickey"
 }
 
-class ChallengeResponse: SaltedPacket() {
+class ChallengeResponse: TokenPacket() {
     init { type = Type.CHALLENGE_RESPONSE.id }
-
-    var xorsalt = 0
-
-    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(xorsalt)
-
-    override fun deserialize(d: Decoder) {
-        super.deserialize(d)
-        xorsalt = d.readInt()
-    }
 }
 
-class ConnectionAccepted: SaltedPacket() {
+class ConnectionAccepted: TokenPacket() {
     init { type = Type.CONNECTION_ACCEPTED.id }
 
     var clientid = 0
@@ -81,21 +85,15 @@ class ConnectionAccepted: SaltedPacket() {
         super.deserialize(d)
         clientid = d.readInt()
     }
+
+    override fun toString(): String = super.toString()+", $clientid"
 }
 
-class ConnectionRefused: SaltedPacket() {
+class ConnectionRefused: Packet() {
     init { type = Type.CONNECTION_REFUSED.id }
 }
 
-class KeepAlive: SaltedPacket() {
-    init { type = Type.KEEP_ALIVE.id }
-}
-
-class Disconnect: SaltedPacket() {
-    init { type = Type.DISCONNECT.id }
-}
-
-class ServerState: SaltedPacket() {
+class ServerState: TokenPacket() {
     init { type = Type.SERVER_STATE.id }
 
     var data: Byte = 0 //test
@@ -106,10 +104,16 @@ class ServerState: SaltedPacket() {
         super.deserialize(d)
         data = d.readByte()
     }
+
+    override fun toString(): String = super.toString()+", $data"
 }
 
-open class ClientCommand: SaltedPacket() {
-    init { type = Type.CLIENT_COMMAND.id }
+class KeepAlive: TokenPacket() {
+    init { type = Type.KEEP_ALIVE.id }
+}
+
+open class Command(): TokenPacket() {
+    init { type = Type.COMMAND.id }
 
     var commanddate = 0L
     var command: Byte = 0
@@ -121,8 +125,14 @@ open class ClientCommand: SaltedPacket() {
         commanddate = d.readLong()
         command = d.readByte()
     }
+
+    override fun toString(): String = super.toString()+", $commanddate, $command"
 }
 
-class ClientCommandAck: ClientCommand() {
-    init { type = Type.CLIENT_COMMAND_ACK.id }
+class CommandAck: Command() {
+    init { type = Type.COMMAND_ACK.id }
+}
+
+class Disconnect: TokenPacket() {
+    init { type = Type.DISCONNECT.id }
 }

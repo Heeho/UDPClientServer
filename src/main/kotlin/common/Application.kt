@@ -11,33 +11,34 @@ open class Application(
     protected val socket: DatagramSocket
 ): Disposable {
     companion object {
-        val localaddress = InetAddress.getByName("127.0.0.1")
+        val localaddress = InetAddress.getLocalHost()
         val serverport = 40708
         val protocolversion = "1.0.0".hashCode()
         val sotimeout = 5000
-        val commandtimeout = 100
-        val lastpackettimeout = 100
         val padding = 1000
-        val maxclients = 11
+        val maxconnections = 11
 
-        val emitintervalmillis = 1000L
-        val receiveintervalmillis = 1000L
+        val emitintervalmillis = 60L
+        val receiveintervalmillis = 60L
+        val commandtimeout = 100
+        val lastpackettimeout = 5000L
+        val keepaliveinterval = 1000L
     }
 
-    protected val inpacket = DatagramPacket(ByteArray(padding),padding)
+    protected val inpacket = DatagramPacket(ByteArray(padding), padding)
     protected val decoder = Decoder(inpacket.data)
-    protected val outpacket = DatagramPacket(ByteArray(padding),padding)
+    protected val outpacket = DatagramPacket(ByteArray(padding), padding)
     protected val encoder = Encoder()
 
-    protected val packetmeta = SaltedPacket()
+    protected val packetmeta = TokenPacket()
     protected val connreq = ConnectionRequest()
     protected val chal = Challenge()
     protected val chalre = ChallengeResponse()
     protected val connacc = ConnectionAccepted()
     protected val connref = ConnectionRefused()
     protected val serverstate = ServerState()
-    protected val clientcom = ClientCommand()
-    protected val clientcomack = ClientCommandAck()
+    protected val command = Command()
+    protected val comack = CommandAck()
     protected val keep = KeepAlive()
     protected val disconnect = Disconnect()
 
@@ -47,21 +48,29 @@ open class Application(
     private var emitting = false
     private var receiving = false
 
-    private val emitthread = thread(start=false) {
-        emitting = true
-        while(emitting) {
-            emittimestamp = System.currentTimeMillis()
-            emit()
-            sleep(emitintervalmillis)
+    private val receivethread = thread(start = false) {
+        receiving = true
+        while (receiving) {
+            receivetimestamp = System.currentTimeMillis()
+            try {
+                receive()
+            } catch(e: Exception) {
+                println(e)
+            }
+            sleep(receiveintervalmillis)
         }
     }
-    private val receivethread = thread(start=false) {
-        receiving = true
-        while(receiving) {
-            receivetimestamp = System.currentTimeMillis()
-            //purge()
-            receive()
-            sleep(receiveintervalmillis)
+
+    private val emitthread = thread(start = false) {
+        emitting = true
+        while (emitting) {
+            emittimestamp = System.currentTimeMillis()
+            try {
+                emit()
+            } catch(e: Exception) {
+                println(e)
+            }
+            sleep(emitintervalmillis)
         }
     }
 
@@ -70,33 +79,41 @@ open class Application(
     }
 
     fun start() {
-        startemit()
-        startreceive()
+        receivethread.start()
+        emitthread.start()
     }
 
-    fun stop() {
-        stopemit()
-        stopreceive()
+    open fun stop() {
+        receiving = false
+        emitting = false
     }
 
     override fun dispose() {
         stop()
-        try { socket.close() } finally {  }
+        try {
+            socket.close()
+        } catch(e: Exception) {
+            println(e)
+        }
         encoder.dispose()
         decoder.dispose()
     }
 
-    private fun startemit() { emitthread.start() }
-    private fun stopemit() { emitting = false }
-    private fun startreceive() { receivethread.start() }
-    private fun stopreceive() { receiving = false }
-
-    protected open fun emit() {}
-    protected open fun purge() {}
-
     protected open fun receive() {
         //test
         println("${this::class.java} received packet: ${Packet.Type.values().first { it.id == packetmeta.type }}")
+    }
+
+    protected open fun emit() {
+        //test
+        println("${this::class.java} emitted data.")
+    }
+
+    protected fun badmeta(): Boolean {
+        decoder.reset()
+        packetmeta.deserialize(decoder)
+        decoder.reset()
+        return packetmeta.protocolversion != protocolversion
     }
 
     protected fun send(p: Packet) {
@@ -112,17 +129,19 @@ open class Application(
     private fun pack(b: ByteArray, pad: Boolean = true) {
         outpacket.length = b.size
 
-        val d = if(pad) b.plus(ByteArray(padding - b.size))
-        else b
+        val d = if(pad) b.plus(ByteArray(padding - b.size)) else b
 
         //encrypt d here
 
         outpacket.data = d
     }
 
-    protected fun newsalt() = UUID.randomUUID().hashCode()
+    protected fun newtoken() = UUID.randomUUID().hashCode()
 
-    /*fun getappstatus() {
+    open fun getappstatus() {
+        println("===========================")
+        println("----${this::class.java}----")
+        println("===========================")
         println("--SOCKETS")
         println("${this.socket.localAddress} ${this.socket.localPort}")
         println("--DATAGRAMS")
@@ -130,13 +149,14 @@ open class Application(
         println("outpacket: ${outpacket.address}:${outpacket.port}")
         println("--PACKETS")
         println("connreq: $connreq")
+        println("chal: $chal")
         println("chalre: $chalre")
         println("connacc: $connacc")
         println("connref: $connref")
         println("serverstate: $serverstate")
-        println("clientcom: $clientcom")
-        println("clientcomack: $clientcomack")
+        println("clientcom: $command")
+        println("clientcomack: $comack")
         println("keep: $keep")
         println("disconnect: $disconnect")
-    }*/
+    }
 }
