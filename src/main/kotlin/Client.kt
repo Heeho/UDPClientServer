@@ -4,57 +4,35 @@ import java.net.InetSocketAddress
 import java.net.SocketTimeoutException
 import java.util.ArrayList
 
-class Client(
-  socket: DatagramSocket = DatagramSocket()
-): Application(socket) {
-  enum class State {
-    DISCONNECTED,
-    WAITING_CHALLENGE,
-    WAITING_ACCEPTED,
-    CONNECTED
-  }
-
-  val clientprivatekey: Long
-  val clientpublickey: Long
-
-  var state = State.DISCONNECTED; private set
-  var token = 0; private set
-  var clientid = 0; private set
-  var lastkeepalivetimestamp = 0L; private set
-
+class Client: Application(DatagramSocket()) {
   private val commands = ArrayList<Command>()
+  private val connection: Connection = Connection().apply {
+    this.receiveraddress = InetSocketAddress(serveraddress,serverport)
+  }
 
   init {
-    clientprivatekey = 1
-    clientpublickey = 1
-
-    outpacket.socketAddress = InetSocketAddress(localaddress,serverport)
-    connreq.clientpublickey = clientpublickey
-  }
-
-  private fun connreq() {
-    connreq.clientpublickey = clientpublickey
-    send(connreq)
-    state = State.WAITING_CHALLENGE
+    outpacket.socketAddress = connection.receiveraddress
+    connrequest.clientpublickey = cryptor.publickey
   }
 
   override fun emit() {
-    when(state) {
-      State.DISCONNECTED -> {
-        connreq()
+    when(connection.state) {
+      Connection.State.DISCONNECTED -> {
+        connection.state = Connection.State.WAITING_CHALLENGE
+        send(connrequest,null)
       }
-      State.WAITING_CHALLENGE -> {
-        send(connreq)
+      Connection.State.WAITING_CHALLENGE -> {
+        send(connrequest,null)
       }
-      State.WAITING_ACCEPTED -> {
-        send(chalre)
+      Connection.State.WAITING_ACCEPTED -> {
+        send(chalresponse,connection.receiverpublickey)
       }
-      State.CONNECTED -> {
+      Connection.State.CONNECTED -> {
         if(commands.isNotEmpty())
-          send(commands.first())
-        if(lastkeepalivetimestamp < emittimestamp) {
-          lastkeepalivetimestamp = emittimestamp
-          send(keep)
+          send(commands.first(),connection.receiverpublickey)
+        if(emittimestamp - (connection.lastsendtimestamp?:0) > keepaliveinterval) {
+          send(keep,connection.receiverpublickey)
+          connection.lastsendtimestamp = emittimestamp
         }
       }
     }
@@ -65,51 +43,51 @@ class Client(
       socket.receive(inpacket)
     } catch(ste: SocketTimeoutException) {
       println(ste)
+      connection.state = Connection.State.DISCONNECTED
       return
     }
 
     if(badmeta()) return
-    super.receive()
 
-    decoder.reset()
+    connection.lastreceivetimestamp = receivetimestamp
 
-    when(state) {
-      State.WAITING_CHALLENGE -> {
-        when(packetmeta.type) {
+    when(connection.state) {
+      Connection.State.WAITING_CHALLENGE -> {
+        when(tokenpacket.type) {
           Packet.Type.CHALLENGE.id -> {
-            chal.deserialize(decoder)
-            chalre.token = chal.token
-            send(chalre)
-            state = State.WAITING_ACCEPTED
+            challenge.deserialize(decoder)
+            connection.receiverpublickey = challenge.serverpublickey
+            connection.token = challenge.token
+            chalresponse.token = challenge.token
+            send(chalresponse,connection.receiverpublickey)
+            connection.state = Connection.State.WAITING_ACCEPTED
           }
         }
       }
-      State.WAITING_ACCEPTED -> {
-        when(packetmeta.type) {
+      Connection.State.WAITING_ACCEPTED -> {
+        when(tokenpacket.type) {
           Packet.Type.CONNECTION_ACCEPTED.id -> {
-            connacc.deserialize(decoder)
-            clientid = connacc.clientid
-            state = State.CONNECTED
+            connection.state = Connection.State.CONNECTED
           }
           Packet.Type.CONNECTION_REFUSED.id -> {
-            state = State.DISCONNECTED
+            connection.state = Connection.State.DISCONNECTED
           }
         }
       }
-      State.CONNECTED -> {
-        when(packetmeta.type) {
+      Connection.State.CONNECTED -> {
+        when(tokenpacket.type) {
           Packet.Type.SERVER_STATE.id -> {
             serverstate.deserialize(decoder)
             //
           }
           Packet.Type.COMMAND_ACK.id -> {
             comack.deserialize(decoder)
-            commands.removeIf { it.commanddate == comack.commanddate && it.command == comack.command }
+            commands.removeIf { it.timestamp == comack.timestamp && it.id == comack.id }
           }
         }
       }
       else -> {
-        println("received wrong packet: $packetmeta")
+        println("received wrong packet: $tokenpacket")
       }
     }
   }
@@ -117,17 +95,18 @@ class Client(
   fun command(b: Byte) {
     commands.add(
       Command().apply {
-        this.command = b
-        this.commanddate = receivetimestamp
+        this.token = connection.token?:0
+        this.id = b
+        this.timestamp = receivetimestamp
       }
     )
   }
 
   fun disconnect() {
-    if(state == State.CONNECTED) {
-      disconnect.token = token
-      for (i in 0..10) send(disconnect)
-      state = State.DISCONNECTED
+    if(connection.state == Connection.State.CONNECTED) {
+      disconnect.token = connection.token?:0
+      for (i in 0..10) send(disconnect,connection.receiverpublickey)
+      connection.state = Connection.State.DISCONNECTED
       stop()
     }
   }

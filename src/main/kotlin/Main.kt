@@ -1,8 +1,6 @@
-import java.net.DatagramSocket
-
 fun main() {
-    val server = Server(DatagramSocket())
-    val client = Client(DatagramSocket(55555))
+    val server = Server()
+    val client = Client()
 
     //client.send()
     //server.receive()

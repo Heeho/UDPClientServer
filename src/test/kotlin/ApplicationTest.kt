@@ -1,3 +1,4 @@
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -9,32 +10,45 @@ class ApplicationTest {
     private var server = Server()
 
     @BeforeEach
-    fun inittest() {
+    fun starttest() {
         client.dispose()
         server.dispose()
-        client = Client()
         server = Server()
+        client = Client()
+        server.start()
+        client.start()
+        sleep(1000)
     }
 
     @Test
     fun connect() {
-        server.start()
-        client.start()
-        sleep(2000)
-        client.getappstatus()
-        server.getappstatus()
+        assertEquals(server.connections().first().state,Connection.State.CONNECTED)
+    }
 
+    @Test
+    fun serverstate() {
+        assertEquals(client.lastserverstatetimestamp(),server.lastserverstatetimestamp())
+    }
+
+    @Test
+    fun command() {
         client.command(1)
-        sleep(2000)
-        client.getappstatus()
-        server.getappstatus()
+        sleep(1000)
+        assertEquals(server.lastcomackcommand(),server.lastcommandcommand())
+        assertEquals(client.lastcomackcommand(),server.lastcomackcommand())
+    }
 
+    @Test
+    fun keepalive() {
+        client.command(1)
+        sleep(1000)
+        assertEquals(client.lastkeepalivetoken(),server.lastkeepalivetoken())
+    }
+
+    @Test
+    fun disconnect() {
         client.disconnect()
-        sleep(2000)
-        client.getappstatus()
-        server.getappstatus()
-
-        client.dispose()
-        server.dispose()
+        sleep(1000)
+        assert(server.connections().isEmpty())
     }
 }

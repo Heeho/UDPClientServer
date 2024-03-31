@@ -18,6 +18,7 @@ open class Packet {
 
     var protocolversion = Application.protocolversion
     var type: Byte = 0
+    var requiresserverresponse = false
 
     open fun serialize(e: Encoder): Encoder = e.write(protocolversion).write(type)
 
@@ -32,7 +33,10 @@ open class Packet {
 class ConnectionRequest(
     var clientpublickey: Long = 0
 ): Packet() {
-    init { type = Type.CONNECTION_REQUEST.id }
+    init {
+        type = Type.CONNECTION_REQUEST.id
+        requiresserverresponse = true
+    }
 
     override fun serialize(e: Encoder): Encoder = super.serialize(e).write(clientpublickey)
 
@@ -56,7 +60,9 @@ open class TokenPacket: Packet() {
 }
 
 class Challenge: TokenPacket() {
-    init { type = Type.CHALLENGE.id }
+    init {
+        type = Type.CHALLENGE.id
+    }
 
     var serverpublickey = 0L
 
@@ -71,37 +77,37 @@ class Challenge: TokenPacket() {
 }
 
 class ChallengeResponse: TokenPacket() {
-    init { type = Type.CHALLENGE_RESPONSE.id }
+    init {
+        type = Type.CHALLENGE_RESPONSE.id
+        requiresserverresponse = true
+    }
 }
 
 class ConnectionAccepted: TokenPacket() {
-    init { type = Type.CONNECTION_ACCEPTED.id }
-
-    var clientid = 0
-
-    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(clientid)
-
-    override fun deserialize(d: Decoder) {
-        super.deserialize(d)
-        clientid = d.readInt()
+    init {
+        type = Type.CONNECTION_ACCEPTED.id
     }
-
-    override fun toString(): String = super.toString()+", $clientid"
 }
 
-class ConnectionRefused: Packet() {
-    init { type = Type.CONNECTION_REFUSED.id }
+class ConnectionRefused: TokenPacket() {
+    init {
+        type = Type.CONNECTION_REFUSED.id
+    }
 }
 
 class ServerState: TokenPacket() {
-    init { type = Type.SERVER_STATE.id }
+    init {
+        type = Type.SERVER_STATE.id
+    }
 
+    var timestamp = 0L //test
     var data: Byte = 0 //test
 
-    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(data)
+    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(timestamp).write(data)
 
     override fun deserialize(d: Decoder) {
         super.deserialize(d)
+        timestamp = d.readLong()
         data = d.readByte()
     }
 
@@ -109,30 +115,39 @@ class ServerState: TokenPacket() {
 }
 
 class KeepAlive: TokenPacket() {
-    init { type = Type.KEEP_ALIVE.id }
+    init {
+        type = Type.KEEP_ALIVE.id
+    }
 }
 
-open class Command(): TokenPacket() {
-    init { type = Type.COMMAND.id }
+open class Command: TokenPacket() {
+    init {
+        type = Type.COMMAND.id
+        requiresserverresponse = true
+    }
 
-    var commanddate = 0L
-    var command: Byte = 0
+    var timestamp = 0L
+    var id: Byte = 0
 
-    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(commanddate).write(command)
+    override fun serialize(e: Encoder): Encoder = super.serialize(e).write(timestamp).write(id)
 
     override fun deserialize(d: Decoder) {
         super.deserialize(d)
-        commanddate = d.readLong()
-        command = d.readByte()
+        timestamp = d.readLong()
+        id = d.readByte()
     }
 
-    override fun toString(): String = super.toString()+", $commanddate, $command"
+    override fun toString(): String = super.toString()+", $timestamp, $id"
 }
 
 class CommandAck: Command() {
-    init { type = Type.COMMAND_ACK.id }
+    init {
+        type = Type.COMMAND_ACK.id
+    }
 }
 
 class Disconnect: TokenPacket() {
-    init { type = Type.DISCONNECT.id }
+    init {
+        type = Type.DISCONNECT.id
+    }
 }
