@@ -6,9 +6,11 @@ class Cryptor {
 
     fun encrypt(b: ByteArray, encryptionkey: Long) {
         //b = f(b,encryptionkey)
+        val k = encryptionkey
     }
 
     fun sign(b: ByteArray) {
         //b = f(b,privatekey)
+        val k = privatekey
     }
 }
